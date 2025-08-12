@@ -1,0 +1,264 @@
+---
+title: "NFL Offensive Line Data"
+author: "woessner.21"
+date: "2025-01-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+library(nflverse)
+library(nflreadr)
+
+```
+
+
+```{r}
+library(nflfastR)
+
+ls("package:nflfastR")
+
+```
+
+
+
+
+
+##Start of actual project
+```{r}
+library(dplyr)
+
+# Get team-level offensive stats for multiple seasons
+team_stats <- calculate_stats(
+  seasons = 2020:2023,  # Adjust as needed
+  summary_level = "season",
+  stat_type = "team",
+  season_type = "REG"
+)
+
+```
+```{r}
+
+# Select relevant offensive metrics
+team_offense <- team_stats %>%
+  select(season, team, receiving_epa, rushing_epa, sacks_suffered)
+
+head(team_offense)
+
+```
+
+
+##Importing Salary Data as well as draft value
+```{r}
+library(readr)
+# Load O-Line salary data (example CSV)
+ol_salary_data <- read.csv("C:/Users/Caleb Woessner/OneDrive/Desktop/Sports Analytics Project/Salary Cap Data - OL Salary Data.csv")
+
+# Load Draft capital data
+draft_value_data <- read.csv("C:/Users/Caleb Woessner/OneDrive/Desktop/Sports Analytics Project/Salary Cap Data - OL Draft Capital.csv")
+
+ol_salary_data <- ol_salary_data %>%
+  mutate(olCapPCT = olCapPCT / 100)
+```
+
+
+
+##Summary Statistics Table of Salary
+
+
+
+##Merging the offensive line salaries with the team draft capital
+```{r}
+# Merge offensive stats with salary data
+team_data <- team_offense %>%
+  left_join(ol_salary_data, by = c("season", "team")) %>%
+  left_join(draft_value_data, by = c("season", "team"))
+
+# View the combined dataset
+head(team_data)
+
+```
+```{r}
+library(dplyr)
+library(kableExtra)
+
+# Group by season and summarize offensive line investment
+team_data %>%
+  group_by(season) %>%  # Grouping by season instead of factor(rushing_epa)
+  summarize(
+    "Mean OL Cap Percentage" = mean(olCapPCT, na.rm = TRUE), "SD" = ifelse(n() > 1, sd(olCapPCT, na.rm = TRUE), 0),
+    "Mean OL Draft Capital Percentage" = mean(PCT, na.rm = TRUE), "sd" = ifelse(n() > 1, sd(PCT, na.rm = TRUE), 0), "Mean rushing epa" = mean(rushing_epa), "sd rush" = sd(rushing_epa), "Mean sacks suffered" = sd(sacks_suffered),"sd sacks" = sd(sacks_suffered), "Mean receiving epa" = mean(receiving_epa), "sd recieving" = sd(receiving_epa)
+  ) %>%
+  kbl() %>%
+  kable_styling("striped", "hover", full_width = FALSE)
+
+
+```
+
+
+
+
+
+
+```{r}
+library(ggplot2)
+ggplot(team_data, aes(x = (olCapPCT + PCT)/2, y = receiving_epa)) +
+  geom_point(color = "blue") +  # scatter plot with blue points
+  geom_smooth(method = "lm", se = FALSE, color = "red") +  # optional linear regression line
+  labs(title = "Offensive Line Total Percentage vs. Receiving EPA",
+       x = "Offensive Line Total Percentage",
+       y = "Receiving Expected Points Added") +
+  theme_minimal()
+```
+```{r}
+ggplot(team_data, aes(x = (olCapPCT + PCT)/2, y = rushing_epa)) +
+  geom_point(color = "blue") +  # scatter plot with blue points
+  geom_smooth(method = "lm", se = FALSE, color = "red") +  # optional linear regression line
+  labs(title = "Offensive Line Total Percentage vs. Rushing EPA",
+       x = "Offensive Line Total Percentage",
+       y = "Rushing Expected Points Added") +
+  theme_minimal()
+```
+```{r}
+ggplot(team_data, aes(x = (olCapPCT + PCT)/2, y = sacks_suffered)) +
+  geom_point(color = "blue") +  # scatter plot with blue points
+  geom_smooth(method = "lm", se = FALSE, color = "red") +  # optional linear regression line
+  labs(title = "Offensive Line Total Percentage vs. Sacks Suffered",
+       x = "Offensive Line Total Percentage",
+       y = "Sacks Suffered") +
+  theme_minimal()
+```
+
+
+
+##Test whether O-line investment impacts offensive efficiency
+
+```{r}
+# Fit the models
+model_passing <- lm(receiving_epa ~ olCapPCT + PCT, data = team_data)
+model_rushing <- lm(rushing_epa ~ olCapPCT + PCT, data = team_data)
+model_sacks <- lm(sacks_suffered ~ olCapPCT + PCT, data = team_data)
+
+# Create a function to extract estimates, t-values, and R-squared
+extract_model_info <- function(model, model_name) {
+  coefs <- summary(model)$coefficients
+  r_squared <- summary(model)$r.squared
+  data.frame(
+    Model = model_name,
+    Term = rownames(coefs),
+    Estimate = round(coefs[, "Estimate"], 3),
+    t_value = round(coefs[, "t value"], 3),
+    R_squared = round(r_squared, 3)
+  )
+}
+
+# Combine results from all models
+results <- do.call(rbind, list(
+  extract_model_info(model_passing, "Passing EPA"),
+  extract_model_info(model_rushing, "Rushing EPA"),
+  extract_model_info(model_sacks, "Sacks Suffered")
+))
+
+# Print the result table
+print(results)
+
+
+```
+
+
+
+```{r}
+team_name <- "KC"
+team_trends <- team_data %>%
+  filter(team == team_name) %>%
+  group_by(season) %>%
+  summarise(
+    Total_OL_Investment = (mean(olCapPCT, na.rm = TRUE) * 100 + mean(PCT, na.rm = TRUE) * 100)/2,  
+    Avg_Receiving_EPA = mean(receiving_epa, na.rm = TRUE),
+    Avg_Rushing_EPA = mean(rushing_epa, na.rm = TRUE)
+  )
+
+ggplot(team_trends, aes(x = season)) +
+  geom_line(aes(y = Total_OL_Investment, color = "Total OL Investment %"), size = 1.2) +
+  geom_line(aes(y = Avg_Receiving_EPA, color = "Receiving EPA"), size = 1.2) +
+  geom_line(aes(y = Avg_Rushing_EPA, color = "Rushing EPA"), size = 1.2) +
+  
+  geom_point(aes(y = Total_OL_Investment, color = "Total OL Investment %"), size = 2) +
+  geom_point(aes(y = Avg_Receiving_EPA, color = "Receiving EPA"), size = 2) +
+  geom_point(aes(y = Avg_Rushing_EPA, color = "Rushing EPA"), size = 2) +
+  
+  labs(title = paste("Total OL Investment and Offensive Performance for", team_name),
+       x = "Season",
+       y = "Value",
+       color = "Metric") +
+  
+  scale_y_continuous(sec.axis = sec_axis(~ ., name = "EPA / OL Investment %")) +  
+  theme_minimal()
+
+```
+
+
+```{r}
+team_name <- "CLE"
+team_trends <- team_data %>%
+  filter(team == team_name) %>%
+  group_by(season) %>%
+  summarise(
+    Total_OL_Investment = (mean(olCapPCT, na.rm = TRUE) * 100 + mean(PCT, na.rm = TRUE) * 100)/2,  
+    Avg_Receiving_EPA = mean(receiving_epa, na.rm = TRUE),
+    Avg_Rushing_EPA = mean(rushing_epa, na.rm = TRUE)
+  )
+
+ggplot(team_trends, aes(x = season)) +
+  geom_line(aes(y = Total_OL_Investment, color = "Total OL Investment %"), size = 1.2) +
+  geom_line(aes(y = Avg_Receiving_EPA, color = "Receiving EPA"), size = 1.2) +
+  geom_line(aes(y = Avg_Rushing_EPA, color = "Rushing EPA"), size = 1.2) +
+  
+  geom_point(aes(y = Total_OL_Investment, color = "Total OL Investment %"), size = 2) +
+  geom_point(aes(y = Avg_Receiving_EPA, color = "Receiving EPA"), size = 2) +
+  geom_point(aes(y = Avg_Rushing_EPA, color = "Rushing EPA"), size = 2) +
+  
+  labs(title = paste("Total OL Investment and Offensive Performance for", team_name),
+       x = "Season",
+       y = "Value",
+       color = "Metric") +
+  
+  scale_y_continuous(sec.axis = sec_axis(~ ., name = "EPA / OL Investment %")) +  
+  theme_minimal()
+
+```
+
+```{r}
+team_name <- "PHI"
+team_trends <- team_data %>%
+  filter(team == team_name) %>%
+  group_by(season) %>%
+  summarise(
+    Total_OL_Investment = (mean(olCapPCT, na.rm = TRUE) * 100 + mean(PCT, na.rm = TRUE) * 100)/2,  
+    Avg_Receiving_EPA = mean(receiving_epa, na.rm = TRUE),
+    Avg_Rushing_EPA = mean(rushing_epa, na.rm = TRUE)
+  )
+
+ggplot(team_trends, aes(x = season)) +
+  geom_line(aes(y = Total_OL_Investment, color = "Total OL Investment %"), size = 1.2) +
+  geom_line(aes(y = Avg_Receiving_EPA, color = "Receiving EPA"), size = 1.2) +
+  geom_line(aes(y = Avg_Rushing_EPA, color = "Rushing EPA"), size = 1.2) +
+  
+  geom_point(aes(y = Total_OL_Investment, color = "Total OL Investment %"), size = 2) +
+  geom_point(aes(y = Avg_Receiving_EPA, color = "Receiving EPA"), size = 2) +
+  geom_point(aes(y = Avg_Rushing_EPA, color = "Rushing EPA"), size = 2) +
+  
+  labs(title = paste("Total OL Investment and Offensive Performance for", team_name),
+       x = "Season",
+       y = "Value",
+       color = "Metric") +
+  
+  scale_y_continuous(sec.axis = sec_axis(~ ., name = "EPA / OL Investment %")) +  
+  theme_minimal()
+
+```
